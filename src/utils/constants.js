@@ -1,0 +1,39 @@
+// src/utils/constants.js
+export const ROLES = {
+    ADMIN: 'ADMIN',
+    MANAGER: 'MANAGER',
+    SUPERVISOR: 'SUPERVISOR',
+    OPERATOR: 'OPERATOR',
+    VIEWER: 'VIEWER',
+};
+
+export const BATCH_STATUS = {
+    CREATED: 'CREATED',
+    IN_PROGRESS: 'IN_PROGRESS',
+    ON_HOLD: 'ON_HOLD',
+    COMPLETED: 'COMPLETED',
+    CANCELLED: 'CANCELLED',
+};
+
+export const MACHINE_STATUS = {
+    IDLE: 'IDLE',
+    RUNNING: 'RUNNING',
+    CLEANING: 'CLEANING',
+    DOWN: 'DOWN',
+};
+
+export const AUDIT_ACTIONS = {
+    CREATE: 'CREATE',
+    UPDATE: 'UPDATE',
+    DELETE: 'DELETE',
+    MOVE: 'MOVE',
+    STATUS_CHANGE: 'STATUS_CHANGE',
+    HOLD: 'HOLD',
+    RESUME: 'RESUME',
+    COMPLETE: 'COMPLETE',
+    CANCEL: 'CANCEL',
+    PLACE: 'PLACE',
+    REMOVE: 'REMOVE',
+};
+
+export const ROLE_HIERARCHY = ['VIEWER', 'OPERATOR', 'SUPERVISOR', 'MANAGER', 'ADMIN'];

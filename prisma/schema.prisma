@@ -1,0 +1,185 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+enum Role {
+  ADMIN
+  MANAGER
+  SUPERVISOR
+  OPERATOR
+  VIEWER
+}
+
+enum BatchStatus {
+  CREATED
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum MachineStatus {
+  IDLE
+  RUNNING
+  CLEANING
+  DOWN
+}
+
+// ============================================================
+// MODELS - Simplified
+// ============================================================
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         Role          @default(OPERATOR)
+  isActive     Boolean       @default(true)
+  lastLoginAt  DateTime?
+  refreshToken String?
+  
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("users")
+}
+
+model Area {
+  id       String   @id @default(uuid())
+  name     String
+  code     String   @unique
+  isActive Boolean  @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("areas")
+}
+
+model Stage {
+  id          String   @id @default(uuid())
+  areaId      String
+  name        String
+  sequence    Int
+  isActive    Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([areaId, sequence])
+  @@map("stages")
+}
+
+model Machine {
+  id         String        @id @default(uuid())
+  stageId    String
+  name       String
+  code       String?
+  status     MachineStatus @default(IDLE)
+  sequence   Int?
+  isActive   Boolean       @default(true)
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([stageId, name])
+  @@map("machines")
+}
+
+model Product {
+  id             String   @id @default(uuid())
+  name           String
+  code           String   @unique
+  isActive       Boolean  @default(true)
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("products")
+}
+
+model Batch {
+  id                String       @id @default(uuid())
+  batchNo           String       @unique
+  productId         String
+  batchSizeText     String
+  batchSizeValue    Float?
+  status            BatchStatus  @default(CREATED)
+  currentStageId    String?
+  currentMachineId  String?
+  
+  startedAt         DateTime?
+  completedAt       DateTime?
+  remarks           String?
+  
+  createdById       String
+  
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@map("batches")
+}
+
+model Placement {
+  id          String   @id @default(uuid())
+  batchId     String
+  stageId     String
+  machineId   String
+  active      Boolean  @default(true)
+  
+  placedAt    DateTime @default(now())
+  removedAt   DateTime?
+  
+  placedById  String
+  remarks     String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([machineId, active])
+  @@unique([batchId, active])
+  @@index([machineId, active])
+  @@index([batchId, active])
+  @@map("placements")
+}
+
+model AuditLog {
+  id          String       @id @default(uuid())
+  entityType  String
+  entityId    String
+  action      String
+  beforeData  Json?
+  afterData   Json?
+  performedById String
+  performedAt  DateTime   @default(now())
+  note        String?
+  ipAddress   String?
+  userAgent   String?
+  
+  @@index([entityType, entityId])
+  @@index([performedAt])
+  @@map("audit_logs")
+}
+
+model Snapshot {
+  id         String   @id @default(uuid())
+  areaId     String
+  takenAt    DateTime @default(now())
+  takenById  String
+  type       String   @default("manual")
+  boardState Json
+  
+  createdAt  DateTime @default(now())
+
+  @@map("snapshots")
+}
