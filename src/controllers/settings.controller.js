@@ -1,5 +1,13 @@
 // src/controllers/settings.controller.js
 const prisma = require('../config/database');
+const { getSocket } = require('../config/socket');
+
+const emitSettingsEvent = (event, data) => {
+    const io = getSocket();
+    if (io) {
+        io.emit(`settings:${event}`, data);
+    }
+};
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -34,11 +42,12 @@ const getSettings = async (req, res, next) => {
         const settingsObject = settings.reduce((acc, setting) => {
             try {
                 // Parse the value if it's a string, otherwise use as is
-                acc[setting.key] = setting.value !== null && typeof setting.value === 'string'
-                    ? JSON.parse(setting.value)
-                    : setting.value;
+                if (setting.value !== null && typeof setting.value === 'string') {
+                    acc[setting.key] = JSON.parse(setting.value);
+                } else {
+                    acc[setting.key] = setting.value;
+                }
             } catch (e) {
-                // If parsing fails, use the raw value
                 acc[setting.key] = setting.value;
             }
             return acc;
@@ -118,13 +127,9 @@ const upsertSettings = async (req, res, next) => {
             });
         }
 
-        const results = [];
         const operations = [];
 
         for (const [key, value] of Object.entries(settings)) {
-            // Skip if value is null or undefined
-            if (value === null || value === undefined) continue;
-
             // Determine category
             let category = 'general';
             if (key.startsWith('branding_')) category = 'branding';
@@ -132,8 +137,13 @@ const upsertSettings = async (req, res, next) => {
             else if (key.startsWith('security_')) category = 'security';
             else if (key.startsWith('integration_')) category = 'integration';
 
-            // Store as JSON string, but preserve the actual value
-            const valueToStore = JSON.stringify(value);
+            // Store as JSON string, but handle null properly
+            let valueToStore;
+            if (value === null || value === undefined) {
+                valueToStore = null;
+            } else {
+                valueToStore = JSON.stringify(value);
+            }
 
             operations.push(
                 prisma.systemSetting.upsert({
@@ -170,14 +180,21 @@ const upsertSettings = async (req, res, next) => {
         // Convert response to key-value format
         const responseObject = updatedSettings.reduce((acc, setting) => {
             try {
-                acc[setting.key] = setting.value !== null && typeof setting.value === 'string'
-                    ? JSON.parse(setting.value)
-                    : setting.value;
+                if (setting.value !== null && typeof setting.value === 'string') {
+                    acc[setting.key] = JSON.parse(setting.value);
+                } else {
+                    acc[setting.key] = setting.value;
+                }
             } catch (e) {
                 acc[setting.key] = setting.value;
             }
             return acc;
         }, {});
+
+        emitSettingsEvent('updated', {
+            settings: responseObject,
+            initiatedBy: req.user?.id,
+        });
 
         res.json({
             success: true,
@@ -195,7 +212,7 @@ const updateSetting = async (req, res, next) => {
         const { key } = req.params;
         const { value, description } = req.body;
 
-        if (value === undefined || value === null) {
+        if (value === undefined) {
             return res.status(400).json({
                 success: false,
                 error: { code: 'VALIDATION_ERROR', message: 'Value is required' },
@@ -208,7 +225,13 @@ const updateSetting = async (req, res, next) => {
         else if (key.startsWith('security_')) category = 'security';
         else if (key.startsWith('integration_')) category = 'integration';
 
-        const valueToStore = JSON.stringify(value);
+        // Handle null values properly
+        let valueToStore;
+        if (value === null || value === undefined) {
+            valueToStore = null;
+        } else {
+            valueToStore = JSON.stringify(value);
+        }
 
         const setting = await prisma.systemSetting.upsert({
             where: { key },
@@ -248,6 +271,11 @@ const updateSetting = async (req, res, next) => {
             parsedValue = setting.value;
         }
 
+        emitSettingsEvent('updated', {
+            settings: { [key]: parsedValue },
+            initiatedBy: req.user?.id,
+        });
+
         res.json({
             success: true,
             data: {
@@ -269,7 +297,14 @@ const deleteSetting = async (req, res, next) => {
         const { key } = req.params;
 
         if (DEFAULT_SETTINGS[key] !== undefined) {
-            const valueToStore = JSON.stringify(DEFAULT_SETTINGS[key]);
+            // Reset to default
+            const defaultValue = DEFAULT_SETTINGS[key];
+            let valueToStore;
+            if (defaultValue === null || defaultValue === undefined) {
+                valueToStore = null;
+            } else {
+                valueToStore = JSON.stringify(defaultValue);
+            }
 
             const setting = await prisma.systemSetting.upsert({
                 where: { key },
@@ -283,6 +318,11 @@ const deleteSetting = async (req, res, next) => {
                     category: 'general',
                     description: `Default setting for ${key}`,
                 },
+            });
+
+            emitSettingsEvent('updated', {
+                settings: { [key]: defaultValue },
+                initiatedBy: req.user?.id,
             });
 
             return res.json({
@@ -305,6 +345,11 @@ const deleteSetting = async (req, res, next) => {
                 ip: req.ip,
                 userAgent: req.get('user-agent'),
             },
+        });
+
+        emitSettingsEvent('updated', {
+            settings: { [key]: null },
+            initiatedBy: req.user?.id,
         });
 
         res.json({
@@ -336,7 +381,13 @@ const resetSettings = async (req, res, next) => {
             else if (key.startsWith('security_')) category = 'security';
             else if (key.startsWith('integration_')) category = 'integration';
 
-            const valueToStore = JSON.stringify(value);
+            // Handle null values
+            let valueToStore;
+            if (value === null || value === undefined) {
+                valueToStore = null;
+            } else {
+                valueToStore = JSON.stringify(value);
+            }
 
             return prisma.systemSetting.create({
                 data: {
@@ -360,6 +411,11 @@ const resetSettings = async (req, res, next) => {
                 ip: req.ip,
                 userAgent: req.get('user-agent'),
             },
+        });
+
+        emitSettingsEvent('reset', {
+            settings: DEFAULT_SETTINGS,
+            initiatedBy: req.user?.id,
         });
 
         res.json({

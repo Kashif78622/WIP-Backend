@@ -7,8 +7,8 @@ const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
 const { createServer } = require('http');
-const { Server } = require('socket.io');
 const os = require('os');
+const { initSocket } = require('./config/socket');
 
 dotenv.config();
 
@@ -21,6 +21,7 @@ const productRoutes = require('./routes/product.routes');
 const stageRoutes = require('./routes/stage.routes');
 const reportRoutes = require('./routes/report.routes');
 const settingsRoutes = require('./routes/settings.routes');
+const userRoutes = require('./routes/user.routes');
 
 // Import middleware
 const { errorHandler } = require('./middleware/error.middleware');
@@ -49,7 +50,7 @@ const WS_URL = process.env.WS_URL || `http://${LOCAL_IP}:${process.env.PORT || 5
 console.log(`📡 Local IP Address: ${LOCAL_IP}`);
 
 // Socket.IO setup
-const io = new Server(httpServer, {
+const io = initSocket(httpServer, {
     cors: {
         origin: [
             CLIENT_URL,
@@ -135,6 +136,7 @@ app.use('/api/v1/products', productRoutes);
 app.use('/api/v1/stages', stageRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingsRoutes);
+app.use('/api/v1/users', userRoutes);
 
 // Debug route to check server info
 app.get('/api/v1/server-info', (req, res) => {

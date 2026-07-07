@@ -2,6 +2,14 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/database');
+const { getSocket } = require('../config/socket');
+
+const emitUserLogin = (userId, lastLoginAt) => {
+    const io = getSocket();
+    if (io) {
+        io.emit('user:loginUpdated', { id: userId, lastLoginAt });
+    }
+};
 
 const login = async (req, res, next) => {
     try {
@@ -72,17 +80,19 @@ const login = async (req, res, next) => {
         const refreshToken = jwt.sign(
             { userId: user.id },
             process.env.JWT_REFRESH_SECRET,
-            { expiresIn: process.env.JWT_REFRESH_EXPIRY || '7d' }
+            { expiresIn: process.env.JWT_REFRESH_EXPIRY || '24h' }
         );
 
-        // Update user with refresh token and last login
+        const lastLoginAt = new Date();
         await prisma.user.update({
             where: { id: user.id },
             data: {
                 refreshToken,
-                lastLoginAt: new Date()
+                lastLoginAt,
             },
         });
+
+        emitUserLogin(user.id, lastLoginAt.toISOString());
 
         // Remove sensitive data
         const { passwordHash, refreshToken: _, ...userData } = user;
