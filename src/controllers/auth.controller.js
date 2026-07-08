@@ -133,10 +133,9 @@ const refresh = async (req, res, next) => {
 
         const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
-        const user = await prisma.user.findFirst({
+        const user = await prisma.user.findUnique({
             where: {
                 id: decoded.userId,
-                refreshToken: refreshToken,
                 isActive: true,
             },
         });
@@ -151,15 +150,39 @@ const refresh = async (req, res, next) => {
             });
         }
 
+        if (!user.refreshToken || user.refreshToken !== refreshToken) {
+            return res.status(401).json({
+                success: false,
+                error: {
+                    code: 'INVALID_TOKEN',
+                    message: 'Refresh token has been revoked or is invalid'
+                },
+            });
+        }
+
+        const normalizedRefreshToken = jwt.sign(
+            { userId: user.id },
+            process.env.JWT_REFRESH_SECRET,
+            { expiresIn: process.env.JWT_REFRESH_EXPIRY || '24h' }
+        );
+
         const newAccessToken = jwt.sign(
             { userId: user.id, email: user.email, role: user.role },
             process.env.JWT_ACCESS_SECRET,
             { expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m' }
         );
 
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { refreshToken: normalizedRefreshToken },
+        });
+
         res.json({
             success: true,
-            data: { accessToken: newAccessToken },
+            data: {
+                accessToken: newAccessToken,
+                refreshToken: normalizedRefreshToken,
+            },
         });
     } catch (error) {
         if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {

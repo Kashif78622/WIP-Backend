@@ -9,25 +9,31 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  ADMIN
+  MANAGER
+  SUPERVISOR
+  OPERATOR
+  VIEWER
+}
+
 model User {
-  id           String   @id @default(uuid())
+  id           String    @id @default(cuid())
   name         String
-  email        String   @unique
+  email        String    @unique
   passwordHash String
-  role         Role     @default(VIEWER)
-  isActive     Boolean  @default(true)
+  role         Role      @default(VIEWER)
+  isActive     Boolean   @default(true)
+  avatar       String?   // Add this field
   refreshToken String?
   lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  auditLogs AuditLog[]
-
-  @@map("users")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  auditLogs    AuditLog[]
 }
 
 model SystemSetting {
-  id          String   @id @default(uuid())
+  id          String   @id @default(cuid())
   key         String   @unique
   value       Json
   description String?
@@ -35,13 +41,12 @@ model SystemSetting {
   isPublic    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
-  @@map("system_settings")
 }
 
 model AuditLog {
-  id        String   @id @default(uuid())
+  id        String   @id @default(cuid())
   userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   action    String
   entity    String
   entityId  String?
@@ -49,16 +54,4 @@ model AuditLog {
   ip        String?
   userAgent String?
   createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("audit_logs")
-}
-
-enum Role {
-  ADMIN
-  MANAGER
-  SUPERVISOR
-  OPERATOR
-  VIEWER
 }

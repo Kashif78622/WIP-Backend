@@ -1,8 +1,8 @@
-// src/controllers/user.controller.js - Add Socket.IO emits
+// src/controllers/user.controller.js
 
 const bcrypt = require('bcryptjs');
 const prisma = require('../config/database');
-const { getSocket } = require('../config/socket'); // Import socket helper
+const { getSocket } = require('../config/socket');
 
 // Helper function to emit user events
 const emitUserEvent = (event, data, initiatedBy) => {
@@ -15,6 +15,8 @@ const emitUserEvent = (event, data, initiatedBy) => {
     }
 };
 
+// ==================== EXISTING FUNCTIONS ====================
+
 // Get all users
 const getUsers = async (req, res, next) => {
     try {
@@ -25,6 +27,7 @@ const getUsers = async (req, res, next) => {
                 email: true,
                 role: true,
                 isActive: true,
+                avatar: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -57,6 +60,7 @@ const getUser = async (req, res, next) => {
                 email: true,
                 role: true,
                 isActive: true,
+                avatar: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -124,6 +128,7 @@ const createUser = async (req, res, next) => {
                 email: true,
                 role: true,
                 isActive: true,
+                avatar: true,
                 createdAt: true,
             },
         });
@@ -202,6 +207,7 @@ const updateUser = async (req, res, next) => {
                 email: true,
                 role: true,
                 isActive: true,
+                avatar: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -278,6 +284,7 @@ const toggleUserStatus = async (req, res, next) => {
                 email: true,
                 role: true,
                 isActive: true,
+                avatar: true,
             },
         });
 
@@ -358,6 +365,310 @@ const deleteUser = async (req, res, next) => {
     }
 };
 
+// ==================== PROFILE FUNCTIONS ====================
+
+// Get current user profile
+const getProfile = async (req, res, next) => {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                isActive: true,
+                avatar: true,
+                lastLoginAt: true,
+                createdAt: true,
+                updatedAt: true,
+            },
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'User not found' },
+            });
+        }
+
+        res.json({
+            success: true,
+            data: user,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Update profile (name, email, password)
+const updateProfile = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        const { name, email, currentPassword, newPassword } = req.body;
+
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'User not found' },
+            });
+        }
+
+        const updateData = {};
+
+        // Update name if provided
+        if (name && name.trim() !== user.name) {
+            updateData.name = name.trim();
+        }
+
+        // Update email if provided and changed
+        if (email && email.toLowerCase().trim() !== user.email) {
+            const emailExists = await prisma.user.findUnique({
+                where: { email: email.toLowerCase().trim() },
+            });
+            if (emailExists) {
+                return res.status(409).json({
+                    success: false,
+                    error: {
+                        code: 'EMAIL_EXISTS',
+                        message: 'Email already in use',
+                        field: 'email',
+                    },
+                });
+            }
+            updateData.email = email.toLowerCase().trim();
+        }
+
+        // Update password if provided
+        if (newPassword) {
+            if (!currentPassword) {
+                return res.status(400).json({
+                    success: false,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Current password is required to change password',
+                        field: 'currentPassword',
+                    },
+                });
+            }
+
+            const isPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
+            if (!isPasswordValid) {
+                return res.status(401).json({
+                    success: false,
+                    error: {
+                        code: 'INVALID_PASSWORD',
+                        message: 'Current password is incorrect',
+                        field: 'currentPassword',
+                    },
+                });
+            }
+
+            if (newPassword.length < 6) {
+                return res.status(400).json({
+                    success: false,
+                    error: {
+                        code: 'VALIDATION_ERROR',
+                        message: 'Password must be at least 6 characters',
+                        field: 'newPassword',
+                    },
+                });
+            }
+
+            updateData.passwordHash = await bcrypt.hash(newPassword, 10);
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'NO_CHANGES',
+                    message: 'No changes to update',
+                },
+            });
+        }
+
+        const updatedUser = await prisma.user.update({
+            where: { id: userId },
+            data: updateData,
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                isActive: true,
+                avatar: true,
+                lastLoginAt: true,
+                createdAt: true,
+                updatedAt: true,
+            },
+        });
+
+        // Log audit
+        await prisma.auditLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'UPDATE_PROFILE',
+                entity: 'User',
+                entityId: userId,
+                changes: { updatedFields: Object.keys(updateData) },
+                ip: req.ip,
+                userAgent: req.get('user-agent'),
+            },
+        });
+
+        // Emit socket event for profile update
+        const io = getSocket();
+        if (io) {
+            io.emit('user:profileUpdated', {
+                userId: updatedUser.id,
+                ...updatedUser,
+                initiatedBy: req.user.id,
+            });
+        }
+
+        res.json({
+            success: true,
+            data: updatedUser,
+            message: 'Profile updated successfully',
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Update avatar
+const updateAvatar = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        const { avatar } = req.body;
+
+        if (!avatar) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'Avatar data is required',
+                },
+            });
+        }
+
+        // Validate avatar size (max 2MB)
+        const base64Data = avatar.split(',')[1] || avatar;
+        const sizeInBytes = Buffer.from(base64Data, 'base64').length;
+        if (sizeInBytes > 2 * 1024 * 1024) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'Avatar size exceeds 2MB limit',
+                    field: 'avatar',
+                },
+            });
+        }
+
+        const user = await prisma.user.update({
+            where: { id: userId },
+            data: { avatar },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                isActive: true,
+                avatar: true,
+                lastLoginAt: true,
+            },
+        });
+
+        // Log audit
+        await prisma.auditLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'UPDATE_AVATAR',
+                entity: 'User',
+                entityId: userId,
+                changes: { avatarUpdated: true },
+                ip: req.ip,
+                userAgent: req.get('user-agent'),
+            },
+        });
+
+        // Emit socket event
+        const io = getSocket();
+        if (io) {
+            io.emit('user:profileUpdated', {
+                userId: user.id,
+                ...user,
+                initiatedBy: req.user.id,
+            });
+        }
+
+        res.json({
+            success: true,
+            data: { avatar: user.avatar },
+            message: 'Avatar updated successfully',
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// Remove avatar
+const removeAvatar = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+
+        const user = await prisma.user.update({
+            where: { id: userId },
+            data: { avatar: null },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                isActive: true,
+                avatar: true,
+            },
+        });
+
+        // Log audit
+        await prisma.auditLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'REMOVE_AVATAR',
+                entity: 'User',
+                entityId: userId,
+                changes: { avatarRemoved: true },
+                ip: req.ip,
+                userAgent: req.get('user-agent'),
+            },
+        });
+
+        // Emit socket event
+        const io = getSocket();
+        if (io) {
+            io.emit('user:profileUpdated', {
+                userId: user.id,
+                ...user,
+                initiatedBy: req.user.id,
+            });
+        }
+
+        res.json({
+            success: true,
+            data: { avatar: null },
+            message: 'Avatar removed successfully',
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getUsers,
     getUser,
@@ -365,4 +676,8 @@ module.exports = {
     updateUser,
     toggleUserStatus,
     deleteUser,
+    getProfile,
+    updateProfile,
+    updateAvatar,
+    removeAvatar,
 };

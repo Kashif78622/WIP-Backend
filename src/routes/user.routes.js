@@ -9,11 +9,21 @@ const {
     updateUser,
     toggleUserStatus,
     deleteUser,
+    getProfile,
+    updateProfile,
+    updateAvatar,
+    removeAvatar,
 } = require('../controllers/user.controller');
 
 const router = express.Router();
 
-// All user routes require authentication and ADMIN role
+// Profile routes (authenticated users)
+router.get('/profile', authenticate, getProfile);
+router.put('/profile', authenticate, updateProfile);
+router.patch('/profile/avatar', authenticate, updateAvatar);
+router.delete('/profile/avatar', authenticate, removeAvatar);
+
+// Admin routes
 router.use(authenticate);
 router.use(requireRole('ADMIN'));
 
