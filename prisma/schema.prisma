@@ -17,6 +17,8 @@ enum Role {
   VIEWER
 }
 
+// ==================== USER & AUTH ====================
+
 model User {
   id           String    @id @default(cuid())
   name         String
@@ -24,13 +26,156 @@ model User {
   passwordHash String
   role         Role      @default(VIEWER)
   isActive     Boolean   @default(true)
-  avatar       String?   // Add this field
+  avatar       String?
   refreshToken String?
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-  auditLogs    AuditLog[]
+
+  // Relations
+  auditLogs         AuditLog[]
+  batchesCreated    Batch[]     @relation("BatchCreator")
+  placementsPlaced  Placement[] @relation("PlacedBy")
+  placementsRemoved Placement[] @relation("RemovedBy")
+  snapshots         Snapshot[]
 }
+
+// ==================== MASTER DATA ====================
+
+model Area {
+  id          String   @id @default(cuid())
+  name        String
+  code        String?  @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  stages    Stage[]
+  snapshots Snapshot[]
+}
+
+model Stage {
+  id          String   @id @default(cuid())
+  areaId      String
+  name        String
+  sequence    Int      @default(0)
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  area       Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  machines   Machine[]
+  placements Placement[]
+
+  @@unique([areaId, name])
+}
+
+model Machine {
+  id                String   @id @default(cuid())
+  stageId           String
+  name              String
+  code              String?
+  status            String   @default("IDLE")
+  sequence          Int      @default(0)
+  description       String?
+  isActive          Boolean  @default(true)
+  activePlacementId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  stage      Stage       @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  placements Placement[]
+
+  @@unique([stageId, name])
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  name           String
+  code           String?  @unique
+  description    String?
+  defaultStageId String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  batches Batch[]
+}
+
+// ==================== BATCHES & PLACEMENTS ====================
+
+model Batch {
+  id               String    @id @default(cuid())
+  batchNo          String    @unique
+  productId        String
+  batchSizeText    String
+  batchSizeValue   Float?
+  status           String    @default("CREATED")
+  currentStageId   String?
+  currentMachineId String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  remarks          String?
+  createdById      String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // Relations
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy  User        @relation("BatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  placements Placement[]
+}
+
+model Placement {
+  id          String    @id @default(cuid())
+  batchId     String
+  stageId     String
+  machineId   String
+  active      Boolean   @default(true)
+  placedAt    DateTime  @default(now())
+  removedAt   DateTime?
+  placedById  String
+  removedById String?
+  remarks     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  batch     Batch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  stage     Stage   @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  machine   Machine @relation(fields: [machineId], references: [id], onDelete: Restrict)
+  placedBy  User    @relation("PlacedBy", fields: [placedById], references: [id], onDelete: Restrict)
+  removedBy User?   @relation("RemovedBy", fields: [removedById], references: [id])
+
+  @@unique([batchId, active])
+  @@index([machineId, active])
+  @@index([batchId, active])
+  @@index([stageId])
+}
+
+// ==================== SNAPSHOTS ====================
+
+model Snapshot {
+  id        String   @id @default(cuid())
+  areaId    String
+  takenAt   DateTime @default(now())
+  takenById String?
+  type      String   @default("manual")
+  board     Json // Denormalized board state
+  createdAt DateTime @default(now())
+
+  // Relations
+  area    Area  @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  takenBy User? @relation(fields: [takenById], references: [id])
+}
+
+// ==================== SYSTEM SETTINGS ====================
 
 model SystemSetting {
   id          String   @id @default(cuid())
@@ -43,10 +188,11 @@ model SystemSetting {
   updatedAt   DateTime @updatedAt
 }
 
+// ==================== AUDIT LOGS ====================
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   action    String
   entity    String
   entityId  String?
@@ -54,4 +200,7 @@ model AuditLog {
   ip        String?
   userAgent String?
   createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

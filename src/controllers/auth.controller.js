@@ -70,24 +70,18 @@ const login = async (req, res, next) => {
             });
         }
 
-        // Generate tokens
+        // Generate a long-lived access token so the user remains signed in without refresh tokens
         const accessToken = jwt.sign(
             { userId: user.id, email: user.email, role: user.role },
             process.env.JWT_ACCESS_SECRET,
-            { expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m' }
-        );
-
-        const refreshToken = jwt.sign(
-            { userId: user.id },
-            process.env.JWT_REFRESH_SECRET,
-            { expiresIn: process.env.JWT_REFRESH_EXPIRY || '24h' }
+            { expiresIn: process.env.JWT_ACCESS_EXPIRY || '365d' }
         );
 
         const lastLoginAt = new Date();
         await prisma.user.update({
             where: { id: user.id },
             data: {
-                refreshToken,
+                refreshToken: null,
                 lastLoginAt,
             },
         });
@@ -95,14 +89,13 @@ const login = async (req, res, next) => {
         emitUserLogin(user.id, lastLoginAt.toISOString());
 
         // Remove sensitive data
-        const { passwordHash, refreshToken: _, ...userData } = user;
+        const { passwordHash, refreshToken: _refreshToken, ...userData } = user;
 
         res.json({
             success: true,
             data: {
                 user: userData,
                 accessToken,
-                refreshToken,
             },
         });
     } catch (error) {
@@ -119,81 +112,14 @@ const getMe = (req, res) => {
 
 const refresh = async (req, res, next) => {
     try {
-        const { refreshToken } = req.body;
-
-        if (!refreshToken) {
-            return res.status(400).json({
-                success: false,
-                error: {
-                    code: 'MISSING_TOKEN',
-                    message: 'Refresh token is required'
-                },
-            });
-        }
-
-        const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-
-        const user = await prisma.user.findUnique({
-            where: {
-                id: decoded.userId,
-                isActive: true,
-            },
-        });
-
-        if (!user) {
-            return res.status(401).json({
-                success: false,
-                error: {
-                    code: 'INVALID_TOKEN',
-                    message: 'Invalid refresh token'
-                },
-            });
-        }
-
-        if (!user.refreshToken || user.refreshToken !== refreshToken) {
-            return res.status(401).json({
-                success: false,
-                error: {
-                    code: 'INVALID_TOKEN',
-                    message: 'Refresh token has been revoked or is invalid'
-                },
-            });
-        }
-
-        const normalizedRefreshToken = jwt.sign(
-            { userId: user.id },
-            process.env.JWT_REFRESH_SECRET,
-            { expiresIn: process.env.JWT_REFRESH_EXPIRY || '24h' }
-        );
-
-        const newAccessToken = jwt.sign(
-            { userId: user.id, email: user.email, role: user.role },
-            process.env.JWT_ACCESS_SECRET,
-            { expiresIn: process.env.JWT_ACCESS_EXPIRY || '15m' }
-        );
-
-        await prisma.user.update({
-            where: { id: user.id },
-            data: { refreshToken: normalizedRefreshToken },
-        });
-
-        res.json({
-            success: true,
-            data: {
-                accessToken: newAccessToken,
-                refreshToken: normalizedRefreshToken,
+        return res.status(410).json({
+            success: false,
+            error: {
+                code: 'REFRESH_DISABLED',
+                message: 'Refresh tokens are disabled. Please sign in again if your session expires.'
             },
         });
     } catch (error) {
-        if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-            return res.status(401).json({
-                success: false,
-                error: {
-                    code: 'INVALID_TOKEN',
-                    message: 'Invalid or expired refresh token'
-                },
-            });
-        }
         next(error);
     }
 };

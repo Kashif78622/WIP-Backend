@@ -22,6 +22,7 @@ const stageRoutes = require('./routes/stage.routes');
 const reportRoutes = require('./routes/report.routes');
 const settingsRoutes = require('./routes/settings.routes');
 const userRoutes = require('./routes/user.routes');
+const areaRoutes = require('./routes/area.routes');
 
 // Import middleware
 const { errorHandler } = require('./middleware/error.middleware');
@@ -129,6 +130,7 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/areas', areaRoutes);
 app.use('/api/v1/batches', batchRoutes);
 app.use('/api/v1/board', boardRoutes);
 app.use('/api/v1/machines', machineRoutes);
