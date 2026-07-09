@@ -23,6 +23,7 @@ const reportRoutes = require('./routes/report.routes');
 const settingsRoutes = require('./routes/settings.routes');
 const userRoutes = require('./routes/user.routes');
 const areaRoutes = require('./routes/area.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
 
 // Import middleware
 const { errorHandler } = require('./middleware/error.middleware');
@@ -139,6 +140,7 @@ app.use('/api/v1/stages', stageRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/dashboard', dashboardRoutes);
 
 // Debug route to check server info
 app.get('/api/v1/server-info', (req, res) => {
