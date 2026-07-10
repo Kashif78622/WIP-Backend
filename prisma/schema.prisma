@@ -191,16 +191,24 @@ model SystemSetting {
 // ==================== AUDIT LOGS ====================
 
 model AuditLog {
-  id        String   @id @default(cuid())
-  userId    String
-  action    String
-  entity    String
-  entityId  String?
-  changes   Json?
-  ip        String?
-  userAgent String?
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  userId      String
+  action      String   // CREATE, UPDATE, DELETE, STATUS_CHANGE, PLACE, MOVE, HOLD, RESUME, COMPLETE, CANCEL, LOGIN, LOGOUT
+  entity      String   // User, Area, Stage, Machine, Product, Batch, Placement, Snapshot, SystemSetting
+  entityId    String?
+  changes     Json?    // Store the changes made
+  before      Json?    // Store state before change (for updates)
+  after       Json?    // Store state after change
+  ip          String?
+  userAgent   String?
+  details     String?  // Additional context like reason, notes
+  createdAt   DateTime @default(now())
 
   // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([createdAt(sort: Desc)])
+  @@index([userId])
 }
