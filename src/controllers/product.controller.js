@@ -1,4 +1,5 @@
 // src/controllers/product.controller.js
+
 const prisma = require('../config/database');
 const { getSocket } = require('../config/socket');
 const AuditService = require('../services/audit.service');
@@ -114,7 +115,6 @@ const createProduct = async (req, res, next) => {
             });
         }
 
-        // Check for duplicate name
         const existing = await prisma.product.findFirst({
             where: { name: name.trim() },
         });
@@ -126,7 +126,6 @@ const createProduct = async (req, res, next) => {
             });
         }
 
-        // Check for duplicate code
         if (code) {
             const existingCode = await prisma.product.findFirst({
                 where: { code: code.trim() },
@@ -153,7 +152,6 @@ const createProduct = async (req, res, next) => {
             },
         });
 
-        // Audit log
         await AuditService.log({
             userId: req.user.id,
             action: 'CREATE',
@@ -199,7 +197,6 @@ const updateProduct = async (req, res, next) => {
             });
         }
 
-        // Check for duplicate name (excluding current product)
         if (name && name.trim() !== existing.name) {
             const duplicate = await prisma.product.findFirst({
                 where: {
@@ -215,7 +212,6 @@ const updateProduct = async (req, res, next) => {
             }
         }
 
-        // Check for duplicate code (excluding current product)
         if (code && code.trim() !== existing.code) {
             const duplicate = await prisma.product.findFirst({
                 where: {
@@ -248,7 +244,6 @@ const updateProduct = async (req, res, next) => {
             },
         });
 
-        // Audit log
         await AuditService.log({
             userId: req.user.id,
             action: 'UPDATE',
@@ -303,7 +298,6 @@ const toggleProductStatus = async (req, res, next) => {
             });
         }
 
-        // Check if product has existing batches before disabling
         if (isActive === false && existing._count.batches > 0) {
             return res.status(409).json({
                 success: false,
@@ -347,7 +341,7 @@ const toggleProductStatus = async (req, res, next) => {
     }
 };
 
-// Delete product (soft delete - only if no batches)
+// Delete product (HARD DELETE)
 const deleteProduct = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -378,9 +372,9 @@ const deleteProduct = async (req, res, next) => {
             });
         }
 
-        const product = await prisma.product.update({
+        // HARD DELETE
+        await prisma.product.delete({
             where: { id },
-            data: { isActive: false },
         });
 
         await AuditService.log({
@@ -391,7 +385,7 @@ const deleteProduct = async (req, res, next) => {
             changes: { deleted: true, name: existing.name },
             ip: req.ip,
             userAgent: req.get('user-agent'),
-            details: `Product "${existing.name}" deleted (soft delete)`,
+            details: `Product "${existing.name}" deleted`,
         });
 
         emitProductEvent('deleted', { id, name: existing.name }, req.user.id);
@@ -499,7 +493,6 @@ const bulkImportProducts = async (req, res, next) => {
                     continue;
                 }
 
-                // Check for duplicate
                 const existing = await prisma.product.findFirst({
                     where: {
                         OR: [

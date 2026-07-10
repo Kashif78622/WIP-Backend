@@ -1,3 +1,5 @@
+// src/controllers/area.controller.js
+
 const prisma = require('../config/database');
 const { getSocket } = require('../config/socket');
 
@@ -12,10 +14,14 @@ const emitAreaEvent = (event, data, initiatedBy) => {
 const getAreas = async (req, res, next) => {
     try {
         const { includeInactive } = req.query;
-        // Default to false if not provided, but include all when true
         const where = {};
         if (includeInactive !== 'true') {
             where.isActive = true;
+        }
+
+        // Filter by assigned areas for non-admin users
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            where.id = { in: req.user.assignedAreaIds };
         }
 
         const areas = await prisma.area.findMany({
@@ -24,7 +30,10 @@ const getAreas = async (req, res, next) => {
                 stages: {
                     include: {
                         machines: {
-                            // Always include all machines regardless of status
+                            // Filter machines by assigned machine IDs for operators
+                            ...(req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0
+                                ? { where: { id: { in: req.user.assignedMachineIds } } }
+                                : {}),
                         },
                     },
                 },
@@ -42,11 +51,29 @@ const getAreas = async (req, res, next) => {
 const getArea = async (req, res, next) => {
     try {
         const { id } = req.params;
+
+        // Check if user has access to this area
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            if (!req.user.assignedAreaIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this area' },
+                });
+            }
+        }
+
         const area = await prisma.area.findUnique({
             where: { id },
             include: {
                 stages: {
-                    include: { machines: true },
+                    include: {
+                        machines: {
+                            // Filter machines by assigned machine IDs for operators
+                            ...(req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0
+                                ? { where: { id: { in: req.user.assignedMachineIds } } }
+                                : {}),
+                        },
+                    },
                 },
             },
         });
@@ -133,6 +160,16 @@ const updateArea = async (req, res, next) => {
             });
         }
 
+        // Check if user has access to this area
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            if (!req.user.assignedAreaIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this area' },
+                });
+            }
+        }
+
         const updateData = {};
         if (name !== undefined) updateData.name = name.trim();
         if (code !== undefined) updateData.code = code?.trim() || null;
@@ -168,7 +205,7 @@ const updateArea = async (req, res, next) => {
     }
 };
 
-// Delete area (soft delete)
+// Delete area (HARD DELETE)
 const deleteArea = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -177,7 +214,15 @@ const deleteArea = async (req, res, next) => {
             where: { id },
             include: {
                 stages: {
-                    include: { machines: true },
+                    include: {
+                        machines: {
+                            include: {
+                                placements: {
+                                    where: { active: true },
+                                },
+                            },
+                        },
+                    },
                 },
             },
         });
@@ -189,21 +234,54 @@ const deleteArea = async (req, res, next) => {
             });
         }
 
-        // Soft delete - just deactivate
-        const area = await prisma.area.update({
-            where: { id },
-            data: { isActive: false },
-        });
+        // Check if user has access to this area
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            if (!req.user.assignedAreaIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this area' },
+                });
+            }
+        }
 
-        // Also deactivate all stages and machines in this area
-        await prisma.stage.updateMany({
+        // Check if any machine in this area has active placements
+        let hasActivePlacements = false;
+        for (const stage of existing.stages) {
+            for (const machine of stage.machines) {
+                if (machine.placements.length > 0) {
+                    hasActivePlacements = true;
+                    break;
+                }
+            }
+            if (hasActivePlacements) break;
+        }
+
+        if (hasActivePlacements) {
+            return res.status(409).json({
+                success: false,
+                error: {
+                    code: 'HAS_ACTIVE_BATCHES',
+                    message: 'Cannot delete area with active batches. Please complete or cancel all batches first.',
+                },
+            });
+        }
+
+        // HARD DELETE: Delete all machines first, then stages, then area
+        for (const stage of existing.stages) {
+            // Delete all machines in this stage
+            await prisma.machine.deleteMany({
+                where: { stageId: stage.id },
+            });
+        }
+
+        // Delete all stages in this area
+        await prisma.stage.deleteMany({
             where: { areaId: id },
-            data: { isActive: false },
         });
 
-        await prisma.machine.updateMany({
-            where: { stage: { areaId: id } },
-            data: { isActive: false },
+        // Delete the area
+        await prisma.area.delete({
+            where: { id },
         });
 
         await prisma.auditLog.create({
@@ -212,22 +290,23 @@ const deleteArea = async (req, res, next) => {
                 action: 'DELETE',
                 entity: 'Area',
                 entityId: id,
-                changes: { deleted: true },
+                changes: { deleted: true, name: existing.name },
                 ip: req.ip,
                 userAgent: req.get('user-agent'),
             },
         });
 
-        emitAreaEvent('deleted', { id }, req.user.id);
+        emitAreaEvent('deleted', { id, name: existing.name }, req.user.id);
 
         res.json({
             success: true,
-            message: 'Area deactivated successfully',
+            message: 'Area deleted successfully',
         });
     } catch (error) {
         next(error);
     }
 };
+
 const toggleAreaStatus = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -256,8 +335,39 @@ const toggleAreaStatus = async (req, res, next) => {
             });
         }
 
-        // If disabling, also disable all stages and machines in this area
+        // Check if user has access to this area
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            if (!req.user.assignedAreaIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this area' },
+                });
+            }
+        }
+
+        // If disabling, check for active machines
         if (isActive === false) {
+            let hasActiveMachines = false;
+            for (const stage of existing.stages) {
+                for (const machine of stage.machines) {
+                    if (machine.status === 'RUNNING') {
+                        hasActiveMachines = true;
+                        break;
+                    }
+                }
+                if (hasActiveMachines) break;
+            }
+
+            if (hasActiveMachines) {
+                return res.status(409).json({
+                    success: false,
+                    error: {
+                        code: 'HAS_ACTIVE_MACHINES',
+                        message: 'Cannot disable area with active machines. Please complete or cancel all batches first.',
+                    },
+                });
+            }
+
             await prisma.stage.updateMany({
                 where: { areaId: id },
                 data: { isActive: false },
@@ -296,6 +406,7 @@ const toggleAreaStatus = async (req, res, next) => {
         next(error);
     }
 };
+
 module.exports = {
     getAreas,
     getArea,

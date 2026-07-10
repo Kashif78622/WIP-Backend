@@ -32,12 +32,36 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  // Permissions system
+  isSuperAdmin  Boolean   @default(false)  // Only the first admin from seed
+  permissions   String[]  @default([])
+  
+  // Assignments
+  assignedAreaIds String[] @default([])
+  assignedStageIds String[] @default([])
+  assignedMachineIds String[] @default([])
+
   // Relations
   auditLogs         AuditLog[]
   batchesCreated    Batch[]     @relation("BatchCreator")
   placementsPlaced  Placement[] @relation("PlacedBy")
   placementsRemoved Placement[] @relation("RemovedBy")
   snapshots         Snapshot[]
+}
+
+// ==================== PERMISSIONS ====================
+
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  label       String
+  description String?
+  category    String   @default("general")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("permissions")
 }
 
 // ==================== MASTER DATA ====================
@@ -51,7 +75,6 @@ model Area {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // Relations
   stages    Stage[]
   snapshots Snapshot[]
 }
@@ -66,7 +89,6 @@ model Stage {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // Relations
   area       Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
   machines   Machine[]
   placements Placement[]
@@ -87,7 +109,6 @@ model Machine {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  // Relations
   stage      Stage       @relation(fields: [stageId], references: [id], onDelete: Cascade)
   placements Placement[]
 
@@ -104,7 +125,6 @@ model Product {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  // Relations
   batches Batch[]
 }
 
@@ -126,7 +146,6 @@ model Batch {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  // Relations
   product    Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
   createdBy  User        @relation("BatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
   placements Placement[]
@@ -146,7 +165,6 @@ model Placement {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  // Relations
   batch     Batch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
   stage     Stage   @relation(fields: [stageId], references: [id], onDelete: Restrict)
   machine   Machine @relation(fields: [machineId], references: [id], onDelete: Restrict)
@@ -167,10 +185,9 @@ model Snapshot {
   takenAt   DateTime @default(now())
   takenById String?
   type      String   @default("manual")
-  board     Json // Denormalized board state
+  board     Json
   createdAt DateTime @default(now())
 
-  // Relations
   area    Area  @relation(fields: [areaId], references: [id], onDelete: Cascade)
   takenBy User? @relation(fields: [takenById], references: [id])
 }
@@ -193,18 +210,17 @@ model SystemSetting {
 model AuditLog {
   id          String   @id @default(cuid())
   userId      String
-  action      String   // CREATE, UPDATE, DELETE, STATUS_CHANGE, PLACE, MOVE, HOLD, RESUME, COMPLETE, CANCEL, LOGIN, LOGOUT
-  entity      String   // User, Area, Stage, Machine, Product, Batch, Placement, Snapshot, SystemSetting
+  action      String
+  entity      String
   entityId    String?
-  changes     Json?    // Store the changes made
-  before      Json?    // Store state before change (for updates)
-  after       Json?    // Store state after change
+  changes     Json?
+  before      Json?
+  after       Json?
   ip          String?
   userAgent   String?
-  details     String?  // Additional context like reason, notes
+  details     String?
   createdAt   DateTime @default(now())
 
-  // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([entity, entityId])

@@ -1,6 +1,8 @@
 // src/controllers/board.controller.js
+
 const prisma = require('../config/database');
 const AuditService = require('../services/audit.service');
+const { getSocket } = require('../config/socket');
 
 // Get complete board data with all areas
 const getBoard = async (req, res, next) => {
@@ -10,6 +12,11 @@ const getBoard = async (req, res, next) => {
         const where = {};
         if (areaId) where.id = areaId;
 
+        // Filter by assigned areas for non-admin users
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            where.id = { in: req.user.assignedAreaIds };
+        }
+
         // Get all areas with their stages and machines
         const areas = await prisma.area.findMany({
             where: {
@@ -18,10 +25,22 @@ const getBoard = async (req, res, next) => {
             },
             include: {
                 stages: {
-                    where: { isActive: true },
+                    where: {
+                        isActive: true,
+                        // Filter by assigned stages for supervisors
+                        ...(req.user.role === 'SUPERVISOR' && req.user.assignedStageIds?.length > 0
+                            ? { id: { in: req.user.assignedStageIds } }
+                            : {}),
+                    },
                     include: {
                         machines: {
-                            where: { isActive: true },
+                            where: {
+                                isActive: true,
+                                // Filter by assigned machines for operators
+                                ...(req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0
+                                    ? { id: { in: req.user.assignedMachineIds } }
+                                    : {}),
+                            },
                             include: {
                                 placements: {
                                     where: { active: true },
@@ -89,14 +108,36 @@ const getAreaBoard = async (req, res, next) => {
     try {
         const { areaId } = req.params;
 
+        // Check if user has access to this area
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            if (!req.user.assignedAreaIds.includes(areaId)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this area' },
+                });
+            }
+        }
+
         const area = await prisma.area.findUnique({
             where: { id: areaId, isActive: true },
             include: {
                 stages: {
-                    where: { isActive: true },
+                    where: {
+                        isActive: true,
+                        // Filter by assigned stages for supervisors
+                        ...(req.user.role === 'SUPERVISOR' && req.user.assignedStageIds?.length > 0
+                            ? { id: { in: req.user.assignedStageIds } }
+                            : {}),
+                    },
                     include: {
                         machines: {
-                            where: { isActive: true },
+                            where: {
+                                isActive: true,
+                                // Filter by assigned machines for operators
+                                ...(req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0
+                                    ? { id: { in: req.user.assignedMachineIds } }
+                                    : {}),
+                            },
                             include: {
                                 placements: {
                                     where: { active: true },
@@ -170,6 +211,16 @@ const getMachineHistory = async (req, res, next) => {
         const { machineId } = req.params;
         const { limit = 20 } = req.query;
 
+        // Check if user has access to this machine
+        if (req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0) {
+            if (!req.user.assignedMachineIds.includes(machineId)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this machine' },
+                });
+            }
+        }
+
         const placements = await prisma.placement.findMany({
             where: { machineId },
             include: {
@@ -204,6 +255,16 @@ const getBoardSnapshot = async (req, res, next) => {
     try {
         const { areaId } = req.params;
         const { timestamp } = req.query;
+
+        // Check if user has access to this area
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            if (!req.user.assignedAreaIds.includes(areaId)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this area' },
+                });
+            }
+        }
 
         const where = { areaId };
         if (timestamp) {
@@ -244,6 +305,16 @@ const takeSnapshot = async (req, res, next) => {
                 success: false,
                 error: { code: 'VALIDATION_ERROR', message: 'Area ID is required' },
             });
+        }
+
+        // Check if user has access to this area
+        if (req.user.role !== 'ADMIN' && req.user.assignedAreaIds?.length > 0) {
+            if (!req.user.assignedAreaIds.includes(areaId)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this area' },
+                });
+            }
         }
 
         // Get current board state

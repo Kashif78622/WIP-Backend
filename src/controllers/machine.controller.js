@@ -1,3 +1,5 @@
+// src/controllers/machine.controller.js
+
 const prisma = require('../config/database');
 const { getSocket } = require('../config/socket');
 
@@ -18,6 +20,11 @@ const getMachines = async (req, res, next) => {
         // Default to false if not provided
         if (includeInactive !== 'true') {
             where.isActive = true;
+        }
+
+        // Filter by assigned machines for operators
+        if (req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0) {
+            where.id = { in: req.user.assignedMachineIds };
         }
 
         const machines = await prisma.machine.findMany({
@@ -57,6 +64,16 @@ const getMachine = async (req, res, next) => {
                 success: false,
                 error: { code: 'NOT_FOUND', message: 'Machine not found' },
             });
+        }
+
+        // Check if user has access to this machine
+        if (req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0) {
+            if (!req.user.assignedMachineIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this machine' },
+                });
+            }
         }
 
         res.json({ success: true, data: machine });
@@ -156,6 +173,16 @@ const updateMachine = async (req, res, next) => {
             });
         }
 
+        // Check if user has access to this machine
+        if (req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0) {
+            if (!req.user.assignedMachineIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this machine' },
+                });
+            }
+        }
+
         const updateData = {};
         if (name !== undefined) updateData.name = name.trim();
         if (code !== undefined) updateData.code = code?.trim() || null;
@@ -220,6 +247,16 @@ const updateMachineStatus = async (req, res, next) => {
             });
         }
 
+        // Check if user has access to this machine
+        if (req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0) {
+            if (!req.user.assignedMachineIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this machine' },
+                });
+            }
+        }
+
         const machine = await prisma.machine.update({
             where: { id },
             data: { status },
@@ -264,7 +301,7 @@ const updateMachineStatus = async (req, res, next) => {
     }
 };
 
-// Delete machine (soft delete)
+// Delete machine (HARD DELETE)
 const deleteMachine = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -285,17 +322,30 @@ const deleteMachine = async (req, res, next) => {
             });
         }
 
+        // Check if user has access to this machine
+        if (req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0) {
+            if (!req.user.assignedMachineIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this machine' },
+                });
+            }
+        }
+
         // Check if machine has active placement
         if (existing.placements.length > 0) {
             return res.status(409).json({
                 success: false,
-                error: { code: 'MACHINE_OCCUPIED', message: 'Cannot deactivate machine with active batch' },
+                error: {
+                    code: 'HAS_ACTIVE_BATCH',
+                    message: 'Cannot delete machine with active batch. Please complete or cancel the batch first.',
+                },
             });
         }
 
-        const machine = await prisma.machine.update({
+        // HARD DELETE
+        await prisma.machine.delete({
             where: { id },
-            data: { isActive: false },
         });
 
         await prisma.auditLog.create({
@@ -304,17 +354,17 @@ const deleteMachine = async (req, res, next) => {
                 action: 'DELETE',
                 entity: 'Machine',
                 entityId: id,
-                changes: { deleted: true },
+                changes: { deleted: true, name: existing.name },
                 ip: req.ip,
                 userAgent: req.get('user-agent'),
             },
         });
 
-        emitMachineEvent('deleted', { id }, req.user.id);
+        emitMachineEvent('deleted', { id, name: existing.name }, req.user.id);
 
         res.json({
             success: true,
-            message: 'Machine deactivated successfully',
+            message: 'Machine deleted successfully',
         });
     } catch (error) {
         next(error);
@@ -359,6 +409,7 @@ const reorderMachines = async (req, res, next) => {
         next(error);
     }
 };
+
 const toggleMachineStatus = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -387,11 +438,24 @@ const toggleMachineStatus = async (req, res, next) => {
             });
         }
 
-        // Check if machine has active placement before disabling
+        // Check if user has access to this machine
+        if (req.user.role === 'OPERATOR' && req.user.assignedMachineIds?.length > 0) {
+            if (!req.user.assignedMachineIds.includes(id)) {
+                return res.status(403).json({
+                    success: false,
+                    error: { code: 'FORBIDDEN', message: 'Access denied to this machine' },
+                });
+            }
+        }
+
+        // If disabling, check for active placement
         if (isActive === false && existing.placements.length > 0) {
             return res.status(409).json({
                 success: false,
-                error: { code: 'MACHINE_OCCUPIED', message: 'Cannot disable machine with active batch' },
+                error: {
+                    code: 'HAS_ACTIVE_BATCH',
+                    message: 'Cannot disable machine with active batch. Please complete or cancel the batch first.',
+                },
             });
         }
 

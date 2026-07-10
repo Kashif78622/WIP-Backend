@@ -15,9 +15,34 @@ const emitUserEvent = (event, data, initiatedBy) => {
     }
 };
 
-// ==================== EXISTING FUNCTIONS ====================
+// ==================== PERMISSION DEFINITIONS ====================
+const PERMISSIONS = {
+    USER_MANAGEMENT: 'user_management',
+    SYSTEM_SETTINGS: 'system_settings',
+    AUDIT_LOGS: 'audit_logs',
+    MASTER_DATA: 'master_data',
+    PRODUCTS: 'products',
+    BATCH_MANAGEMENT: 'batch_management',
+    REPORTS: 'reports',
+    SNAPSHOTS: 'snapshots',
+    MY_BATCHES: 'my_batches',
+    BATCHES: 'batches',
+};
 
-// Get all users
+// ==================== GET ALL PERMISSIONS ====================
+const getPermissions = async (req, res, next) => {
+    try {
+        const permissions = await prisma.permission.findMany({
+            where: { isActive: true },
+            orderBy: { category: 'asc' },
+        });
+        res.json({ success: true, data: permissions });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// ==================== GET ALL USERS ====================
 const getUsers = async (req, res, next) => {
     try {
         const users = await prisma.user.findMany({
@@ -28,6 +53,11 @@ const getUsers = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -47,7 +77,7 @@ const getUsers = async (req, res, next) => {
     }
 };
 
-// Get single user
+// ==================== GET SINGLE USER ====================
 const getUser = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -61,6 +91,11 @@ const getUser = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -83,10 +118,19 @@ const getUser = async (req, res, next) => {
     }
 };
 
-// Create new user
+// ==================== CREATE USER ====================
 const createUser = async (req, res, next) => {
     try {
-        const { name, email, password, role } = req.body;
+        const {
+            name,
+            email,
+            password,
+            role,
+            permissions,
+            assignedAreaIds,
+            assignedStageIds,
+            assignedMachineIds
+        } = req.body;
 
         if (!name || !email || !password || !role) {
             return res.status(400).json({
@@ -96,6 +140,21 @@ const createUser = async (req, res, next) => {
                     message: 'Name, email, password and role are required'
                 },
             });
+        }
+
+        // Check if user is trying to create another super admin
+        // Only the seed-created super admin should exist
+        if (role === 'ADMIN') {
+            const existingSuperAdmin = await prisma.user.findFirst({
+                where: { isSuperAdmin: true },
+            });
+
+            // If this is the first admin being created and it's not the seed admin
+            // Prevent creating another super admin
+            if (existingSuperAdmin && req.user?.id !== existingSuperAdmin.id) {
+                // Normal admins created by super admin should not be super admins
+                // They get permissions assigned by the super admin
+            }
         }
 
         const existingUser = await prisma.user.findUnique({
@@ -114,6 +173,18 @@ const createUser = async (req, res, next) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // Validate permissions - only allow permissions that exist
+        let validPermissionKeys = [];
+        if (permissions && permissions.length > 0) {
+            const validPermissions = await prisma.permission.findMany({
+                where: { key: { in: permissions } },
+            });
+            validPermissionKeys = validPermissions.map(p => p.key);
+        }
+
+        // Non-admin users should not be super admin
+        const isSuperAdmin = false;
+
         const user = await prisma.user.create({
             data: {
                 name: name.trim(),
@@ -121,6 +192,11 @@ const createUser = async (req, res, next) => {
                 passwordHash: hashedPassword,
                 role: role,
                 isActive: true,
+                isSuperAdmin: isSuperAdmin,
+                permissions: validPermissionKeys,
+                assignedAreaIds: assignedAreaIds || [],
+                assignedStageIds: assignedStageIds || [],
+                assignedMachineIds: assignedMachineIds || [],
             },
             select: {
                 id: true,
@@ -129,6 +205,11 @@ const createUser = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
                 createdAt: true,
             },
         });
@@ -139,7 +220,15 @@ const createUser = async (req, res, next) => {
                 action: 'CREATE',
                 entity: 'User',
                 entityId: user.id,
-                changes: { name: user.name, email: user.email, role: user.role },
+                changes: {
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    permissions: user.permissions,
+                    assignedAreaIds: user.assignedAreaIds,
+                    assignedStageIds: user.assignedStageIds,
+                    assignedMachineIds: user.assignedMachineIds,
+                },
                 ip: req.ip,
                 userAgent: req.get('user-agent'),
             },
@@ -157,11 +246,21 @@ const createUser = async (req, res, next) => {
     }
 };
 
-// Update user
+// ==================== UPDATE USER ====================
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { name, email, role, isActive, password } = req.body;
+        const {
+            name,
+            email,
+            role,
+            isActive,
+            password,
+            permissions,
+            assignedAreaIds,
+            assignedStageIds,
+            assignedMachineIds,
+        } = req.body;
 
         const existingUser = await prisma.user.findUnique({
             where: { id },
@@ -171,6 +270,39 @@ const updateUser = async (req, res, next) => {
             return res.status(404).json({
                 success: false,
                 error: { code: 'NOT_FOUND', message: 'User not found' },
+            });
+        }
+
+        // Prevent modifying self
+        if (id === req.user.id) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'CANNOT_MODIFY_SELF',
+                    message: 'You cannot modify your own account'
+                },
+            });
+        }
+
+        // Prevent modifying super admin (only super admin can modify themselves, but they can't)
+        if (existingUser.isSuperAdmin === true && req.user.id !== existingUser.id) {
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'FORBIDDEN',
+                    message: 'You cannot modify the super admin account'
+                },
+            });
+        }
+
+        // Prevent modifying other admins (only super admin can)
+        if (existingUser.role === 'ADMIN' && !req.user.isSuperAdmin) {
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'FORBIDDEN',
+                    message: 'Only super admin can modify admin accounts'
+                },
             });
         }
 
@@ -197,6 +329,21 @@ const updateUser = async (req, res, next) => {
         if (password) {
             updateData.passwordHash = await bcrypt.hash(password, 10);
         }
+        if (permissions !== undefined) {
+            const validPermissions = await prisma.permission.findMany({
+                where: { key: { in: permissions || [] } },
+            });
+            updateData.permissions = validPermissions.map(p => p.key);
+        }
+        if (assignedAreaIds !== undefined) updateData.assignedAreaIds = assignedAreaIds || [];
+        if (assignedStageIds !== undefined) updateData.assignedStageIds = assignedStageIds || [];
+        if (assignedMachineIds !== undefined) updateData.assignedMachineIds = assignedMachineIds || [];
+
+        // Prevent removing super admin status
+        // Only the seed-created super admin can have isSuperAdmin = true
+        if (existingUser.isSuperAdmin === true) {
+            // Keep super admin status
+        }
 
         const user = await prisma.user.update({
             where: { id },
@@ -208,6 +355,11 @@ const updateUser = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -238,7 +390,7 @@ const updateUser = async (req, res, next) => {
     }
 };
 
-// Toggle user status
+// ==================== TOGGLE USER STATUS ====================
 const toggleUserStatus = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -275,6 +427,17 @@ const toggleUserStatus = async (req, res, next) => {
             });
         }
 
+        // Prevent disabling super admin
+        if (existingUser.isSuperAdmin === true) {
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'FORBIDDEN',
+                    message: 'You cannot disable the super admin account'
+                },
+            });
+        }
+
         const user = await prisma.user.update({
             where: { id },
             data: { isActive },
@@ -285,6 +448,11 @@ const toggleUserStatus = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
             },
         });
 
@@ -312,7 +480,7 @@ const toggleUserStatus = async (req, res, next) => {
     }
 };
 
-// Delete user
+// ==================== DELETE USER ====================
 const deleteUser = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -334,6 +502,17 @@ const deleteUser = async (req, res, next) => {
                 error: {
                     code: 'CANNOT_DELETE_SELF',
                     message: 'You cannot delete your own account'
+                },
+            });
+        }
+
+        // Prevent deleting super admin
+        if (existingUser.isSuperAdmin === true) {
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'FORBIDDEN',
+                    message: 'You cannot delete the super admin account'
                 },
             });
         }
@@ -367,7 +546,6 @@ const deleteUser = async (req, res, next) => {
 
 // ==================== PROFILE FUNCTIONS ====================
 
-// Get current user profile
 const getProfile = async (req, res, next) => {
     try {
         const user = await prisma.user.findUnique({
@@ -379,6 +557,11 @@ const getProfile = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -401,7 +584,6 @@ const getProfile = async (req, res, next) => {
     }
 };
 
-// Update profile (name, email, password)
 const updateProfile = async (req, res, next) => {
     try {
         const userId = req.user.id;
@@ -420,12 +602,10 @@ const updateProfile = async (req, res, next) => {
 
         const updateData = {};
 
-        // Update name if provided
         if (name && name.trim() !== user.name) {
             updateData.name = name.trim();
         }
 
-        // Update email if provided and changed
         if (email && email.toLowerCase().trim() !== user.email) {
             const emailExists = await prisma.user.findUnique({
                 where: { email: email.toLowerCase().trim() },
@@ -443,7 +623,6 @@ const updateProfile = async (req, res, next) => {
             updateData.email = email.toLowerCase().trim();
         }
 
-        // Update password if provided
         if (newPassword) {
             if (!currentPassword) {
                 return res.status(400).json({
@@ -502,13 +681,17 @@ const updateProfile = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
                 lastLoginAt: true,
                 createdAt: true,
                 updatedAt: true,
             },
         });
 
-        // Log audit
         await prisma.auditLog.create({
             data: {
                 userId: req.user.id,
@@ -521,7 +704,6 @@ const updateProfile = async (req, res, next) => {
             },
         });
 
-        // Emit socket event for profile update
         const io = getSocket();
         if (io) {
             io.emit('user:profileUpdated', {
@@ -541,7 +723,6 @@ const updateProfile = async (req, res, next) => {
     }
 };
 
-// Update avatar
 const updateAvatar = async (req, res, next) => {
     try {
         const userId = req.user.id;
@@ -557,7 +738,6 @@ const updateAvatar = async (req, res, next) => {
             });
         }
 
-        // Validate avatar size (max 2MB)
         const base64Data = avatar.split(',')[1] || avatar;
         const sizeInBytes = Buffer.from(base64Data, 'base64').length;
         if (sizeInBytes > 2 * 1024 * 1024) {
@@ -581,11 +761,15 @@ const updateAvatar = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
                 lastLoginAt: true,
             },
         });
 
-        // Log audit
         await prisma.auditLog.create({
             data: {
                 userId: req.user.id,
@@ -598,7 +782,6 @@ const updateAvatar = async (req, res, next) => {
             },
         });
 
-        // Emit socket event
         const io = getSocket();
         if (io) {
             io.emit('user:profileUpdated', {
@@ -618,7 +801,6 @@ const updateAvatar = async (req, res, next) => {
     }
 };
 
-// Remove avatar
 const removeAvatar = async (req, res, next) => {
     try {
         const userId = req.user.id;
@@ -633,10 +815,14 @@ const removeAvatar = async (req, res, next) => {
                 role: true,
                 isActive: true,
                 avatar: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
             },
         });
 
-        // Log audit
         await prisma.auditLog.create({
             data: {
                 userId: req.user.id,
@@ -649,7 +835,6 @@ const removeAvatar = async (req, res, next) => {
             },
         });
 
-        // Emit socket event
         const io = getSocket();
         if (io) {
             io.emit('user:profileUpdated', {
@@ -680,4 +865,6 @@ module.exports = {
     updateProfile,
     updateAvatar,
     removeAvatar,
+    getPermissions,
+    PERMISSIONS,
 };

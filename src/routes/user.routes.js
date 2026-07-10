@@ -1,7 +1,9 @@
 // src/routes/user.routes.js
+
 const express = require('express');
 const { authenticate } = require('../middleware/auth.middleware');
 const { requireRole } = require('../middleware/role.middleware');
+const { requirePermission } = require('../middleware/permission.middleware');
 const {
     getUsers,
     getUser,
@@ -13,25 +15,30 @@ const {
     updateProfile,
     updateAvatar,
     removeAvatar,
+    getPermissions,
 } = require('../controllers/user.controller');
 
 const router = express.Router();
 
-// Profile routes (authenticated users)
+// ==================== PUBLIC PERMISSION ROUTE ====================
+router.get('/permissions', getPermissions);
+
+// ==================== PROFILE ROUTES ====================
 router.get('/profile', authenticate, getProfile);
 router.put('/profile', authenticate, updateProfile);
 router.patch('/profile/avatar', authenticate, updateAvatar);
 router.delete('/profile/avatar', authenticate, removeAvatar);
 
-// Admin routes
+// ==================== ADMIN ROUTES ====================
 router.use(authenticate);
 router.use(requireRole('ADMIN'));
 
-router.get('/', getUsers);
-router.get('/:id', getUser);
-router.post('/', createUser);
-router.put('/:id', updateUser);
-router.patch('/:id/status', toggleUserStatus);
-router.delete('/:id', deleteUser);
+// Users CRUD - requires user_management permission
+router.get('/', requirePermission('user_management'), getUsers);
+router.get('/:id', requirePermission('user_management'), getUser);
+router.post('/', requirePermission('user_management'), createUser);
+router.put('/:id', requirePermission('user_management'), updateUser);
+router.patch('/:id/status', requirePermission('user_management'), toggleUserStatus);
+router.delete('/:id', requirePermission('user_management'), deleteUser);
 
 module.exports = router;

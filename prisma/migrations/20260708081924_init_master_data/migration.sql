@@ -224,3 +224,68 @@ ALTER TABLE "Snapshot" ADD CONSTRAINT "Snapshot_takenById_fkey" FOREIGN KEY ("ta
 
 -- AddForeignKey
 ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+
+ALTER TABLE "User" ADD COLUMN "permissions" TEXT[] DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE "User" ADD COLUMN "assignedAreaIds" TEXT[] DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE "User" ADD COLUMN "assignedStageIds" TEXT[] DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE "User" ADD COLUMN "assignedMachineIds" TEXT[] DEFAULT ARRAY[]::TEXT[];
+
+-- Create Permissions table
+CREATE TABLE "permissions" (
+    "id" TEXT NOT NULL,
+    "key" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+    "description" TEXT,
+    "category" TEXT NOT NULL DEFAULT 'general',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "permissions_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "permissions_key_key" ON "permissions"("key");
+
+-- Seed default permissions
+INSERT INTO "permissions" ("id", "key", "label", "description", "category") VALUES
+(gen_random_uuid()::text, 'user_management', 'User Management', 'Manage users and roles', 'admin'),
+(gen_random_uuid()::text, 'system_settings', 'System Settings', 'Configure system settings', 'admin'),
+(gen_random_uuid()::text, 'audit_logs', 'Audit Logs', 'View audit trail', 'admin'),
+(gen_random_uuid()::text, 'master_data', 'Master Data', 'Manage areas, stages, machines', 'admin'),
+(gen_random_uuid()::text, 'products', 'Products', 'Manage products', 'management'),
+(gen_random_uuid()::text, 'batch_management', 'Batch Management', 'Manage all batches', 'supervisor'),
+(gen_random_uuid()::text, 'reports', 'Reports', 'Generate reports', 'management'),
+(gen_random_uuid()::text, 'snapshots', 'Snapshots', 'Take and view snapshots', 'supervisor'),
+(gen_random_uuid()::text, 'my_batches', 'My Batches', 'View own batches', 'operator'),
+(gen_random_uuid()::text, 'batches', 'Batches', 'View all batches', 'viewer');
+
+-- Grant all permissions to existing ADMIN users
+UPDATE "User" 
+SET "permissions" = ARRAY[
+  'user_management', 'system_settings', 'audit_logs', 'master_data',
+  'products', 'batch_management', 'reports', 'snapshots', 'my_batches', 'batches'
+]
+WHERE "role" = 'ADMIN';
+
+-- Grant appropriate permissions to existing users based on role
+UPDATE "User" 
+SET "permissions" = ARRAY['products', 'reports', 'batch_management', 'snapshots']
+WHERE "role" = 'MANAGER';
+
+UPDATE "User" 
+SET "permissions" = ARRAY['batch_management', 'snapshots', 'my_batches']
+WHERE "role" = 'SUPERVISOR';
+
+UPDATE "User" 
+SET "permissions" = ARRAY['my_batches']
+WHERE "role" = 'OPERATOR';
+
+UPDATE "User" 
+SET "permissions" = ARRAY['batches']
+WHERE "role" = 'VIEWER';
+
+
+ALTER TABLE "User" ADD COLUMN "isSuperAdmin" BOOLEAN DEFAULT false;
+
+-- Update the seed admin to be super admin
+UPDATE "User" SET "isSuperAdmin" = true WHERE email = 'admin@gmail.com';

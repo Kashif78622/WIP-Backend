@@ -1,4 +1,5 @@
 // src/middleware/auth.middleware.js
+
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/database');
 
@@ -23,6 +24,11 @@ const authenticate = async (req, res, next) => {
                 email: true,
                 role: true,
                 isActive: true,
+                isSuperAdmin: true,
+                permissions: true,
+                assignedAreaIds: true,
+                assignedStageIds: true,
+                assignedMachineIds: true,
             },
         });
 
@@ -33,6 +39,8 @@ const authenticate = async (req, res, next) => {
             });
         }
 
+        // For super admin, we don't need to filter by assignments
+        // They have access to everything
         req.user = user;
         next();
     } catch (error) {
